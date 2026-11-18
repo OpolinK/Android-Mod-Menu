@@ -31,6 +31,11 @@ jobjectArray GetFeatureList(JNIEnv *env, jobject context) {
     jobjectArray ret;
 
     const char *features[] = {
+			OBFUSCATE("Category_Trench Warfare WW1 Mod"),
+    		OBFUSCATE("1_Toggle_Безкоштовні покупки та 99М валюти"),
+    		OBFUSCATE("2_Toggle_Нескінченні гроші в бою"),
+    		OBFUSCATE("3_Toggle_Безкоштовний Донат (клік по паку в магазині)")
+	
             OBFUSCATE("Toggle_No death"),
             OBFUSCATE("Button_Start Invcibility (30 sec duration)"),
             OBFUSCATE("SeekBar_Score multiplier_1_100"),
@@ -169,14 +174,14 @@ void Changes(JNIEnv *env, jclass clazz, jobject obj, jint featNum, jstring featN
             }
             break;
         case 1:
-            btnPressed = true;
-            break;
-        case 2:
-            scoreMul = value;
-            break;
-        case 3:
-            coinsMul = value;
-            break;
+        	isFreeShopAndCurrency = boolean;
+        	break;
+    	case 2:
+        	isInfiniteBattleMoney = boolean;
+        	break;
+    	case 3:
+        	isFreeDonatePacks = boolean;
+        	break;
         case 5:
             // you can use this for things as detect log, counting function calls, executing side code before the function is executed
             // now instrument wrapper implemented for detecting execution in logcat
@@ -230,6 +235,92 @@ void AddCoins(void *instance, int count) {
 
 
 // we will run our hacks in a new thread so our while loop doesn't block process main thread
+
+// Стани наших перемикачів у Mod Menu
+bool isFreeShopAndCurrency = false;
+bool isInfiniteBattleMoney = false;
+bool isFreeDonatePacks = false;
+
+// --- 1. НЕОБМЕЖЕНА ВАЛЮТА В МЕНЮ ТА БЕЗКОШТОВНІ ПОКУПКИ ---
+int (*old_get_SpecialCurrencyAmount)(void *instance);
+int get_SpecialCurrencyAmount(void *instance) {
+    if (isFreeShopAndCurrency && instance != NULL) {
+        return 99999999; // 99 мільйонів валюти в меню
+    }
+    return old_get_SpecialCurrencyAmount(instance);
+}
+
+void (*old_set_SpecialCurrencyAmount)(void *instance, int value);
+void set_SpecialCurrencyAmount(void *instance, int value) {
+    if (isFreeShopAndCurrency && instance != NULL) {
+        old_set_SpecialCurrencyAmount(instance, 99999999); // Зберігає 99 млн у сейв
+        return;
+    }
+    old_set_SpecialCurrencyAmount(instance, value);
+}
+
+int (*old_Skin_get_Price)(void *instance);
+int Skin_get_Price(void *instance) {
+    if (isFreeShopAndCurrency && instance != NULL) {
+        return 0; // Усі скіни коштують 0
+    }
+    return old_Skin_get_Price(instance);
+}
+
+int (*old_SpecialAttackPack_get_Price)(void *instance);
+int SpecialAttackPack_get_Price(void *instance) {
+    if (isFreeShopAndCurrency && instance != NULL) {
+        return 0; // Усі набори спец-атак коштують 0
+    }
+    return old_SpecialAttackPack_get_Price(instance);
+}
+
+int (*old_SpecialAttack_get_Amount)(void *instance);
+int SpecialAttack_get_Amount(void *instance) {
+    if (isFreeShopAndCurrency && instance != NULL) {
+        return 999; // Завжди 999 зарядів спец-атак
+    }
+    return old_SpecialAttack_get_Amount(instance);
+}
+
+// --- 2. НЕСКІНЧЕННІ ГРОШІ В БОЮ (LEVEL MONEY) ---
+int (*old_get_CurrentMoney)(void *instance);
+int get_CurrentMoney(void *instance) {
+    if (isInfiniteBattleMoney && instance != NULL) {
+        return 999999; // Нескінченні гроші для виклику юнітів у бою
+    }
+    return old_get_CurrentMoney(instance);
+}
+
+void (*old_set_CurrentMoney)(void *instance, int value);
+void set_CurrentMoney(void *instance, int value) {
+    if (isInfiniteBattleMoney && instance != NULL) {
+        old_set_CurrentMoney(instance, 999999);
+        return;
+    }
+    old_set_CurrentMoney(instance, value);
+}
+
+// --- 3. БЕЗКОШТОВНИЙ ДОНАТ (PREMIUM, STARTER PACK, 2X SPEED, LEVEL BOOST) ---
+// Вказівники на внутрішні функції розблокування з IAPManager
+void (*UnlockPremium)(void *instance);
+void (*UnlockStarterPack)(void *instance);
+void (*UnlockDoubleSpeedPack)(void *instance);
+void (*UnlockLevelBoostPack)(void *instance);
+
+void (*old_OnPurchaseClicked)(void *instance, void *product, int cartType);
+void OnPurchaseClicked(void *instance, void *product, int cartType) {
+    if (isFreeDonatePacks && instance != NULL) {
+        // При натисканні на покупку будь-якого донат-паку миттєво відкриваємо всі 4 набори без Google Play!
+        UnlockPremium(instance);
+        UnlockStarterPack(instance);
+        UnlockDoubleSpeedPack(instance);
+        UnlockLevelBoostPack(instance);
+        return;
+    }
+    old_OnPurchaseClicked(instance, product, cartType);
+}
+
 void hack_thread() {
     // This loop should be always enabled in unity game
     // because libil2cpp.so is not loaded into memory immediately.
@@ -240,6 +331,23 @@ void hack_thread() {
     // In Android Studio, to switch between arm64-v8a and armeabi-v7a syntax highlighting,
     // You can modify the "Active ABI" in "Build Variants" to switch to another architecture for parsing.
 #if defined(__aarch64__)
+	// 1. Валюта в меню, ціни скінів та спец-атаки
+    HOOK_LIB("libil2cpp.so", "0x242E63C", get_SpecialCurrencyAmount, old_get_SpecialCurrencyAmount);
+    HOOK_LIB("libil2cpp.so", "0x242E644", set_SpecialCurrencyAmount, old_set_SpecialCurrencyAmount);
+    HOOK_LIB("libil2cpp.so", "0x24434F4", Skin_get_Price, old_Skin_get_Price);
+    HOOK_LIB("libil2cpp.so", "0x24220BC", SpecialAttackPack_get_Price, old_SpecialAttackPack_get_Price);
+    HOOK_LIB("libil2cpp.so", "0x242203C", SpecialAttack_get_Amount, old_SpecialAttack_get_Amount);
+
+    // 2. Гроші в бою
+    HOOK_LIB("libil2cpp.so", "0x2438EF4", get_CurrentMoney, old_get_CurrentMoney);
+    HOOK_LIB("libil2cpp.so", "0x2438EFC", set_CurrentMoney, old_set_CurrentMoney);
+
+    // 3. Ініціалізація методів безкоштовного донату
+    UnlockPremium = (void (*)(void *))getAbsoluteAddress("libil2cpp.so", 0x24339EC);
+    UnlockStarterPack = (void (*)(void *))getAbsoluteAddress("libil2cpp.so", 0x2433AD0);
+    UnlockDoubleSpeedPack = (void (*)(void *))getAbsoluteAddress("libil2cpp.so", 0x2433BB4);
+    UnlockLevelBoostPack = (void (*)(void *))getAbsoluteAddress("libil2cpp.so", 0x2433C98);
+    HOOK_LIB("libil2cpp.so", "0x2431FB0", OnPurchaseClicked, old_OnPurchaseClicked);
     //Il2Cpp: Use RVA offset
     StartInvcibility = (void (*)(void *, float)) getAbsoluteAddress(targetLibName, OBFUSCATE("0x107A3BC"));
     StartInvcibility = (void (*)(void *, float)) getAbsoluteAddress(targetLibName, OBFUSCATE("_characterPlayer_Update"));
